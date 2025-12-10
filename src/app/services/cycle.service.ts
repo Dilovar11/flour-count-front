@@ -16,7 +16,8 @@ export interface CreateCycleDto {
   total: string;
   startTime: string;
   endTime: string;
-  duration: string
+  duration: string;
+  status: Boolean
 }
 
 @Injectable({
@@ -28,7 +29,7 @@ export class CycleService {
   private apiUrl = 'http://localhost:3000/cycles';
 
   constructor(private http: HttpClient) { }
-  
+
   reload() {
     this.refresh$.next();
   }
@@ -46,4 +47,13 @@ export class CycleService {
   createCycle(dto: CreateCycleDto): Observable<any> {
     return this.http.post(this.apiUrl, dto);
   }
+
+  deleteCycle(id: number): Observable<any> {
+    return this.http.delete(`${this.apiUrl}/${id}`);
+  }
+
+  updateCount(dto: CreateCycleDto): Observable<any> {
+    return this.http.put<any>(`${this.apiUrl}/update-count`, dto);
+  }
+
 }

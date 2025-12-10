@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, HostListener } from '@angular/core';
+import { Component, OnInit, OnDestroy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DatePipe, NgClass } from '@angular/common';
 import { CycleService, CreateCycleDto, CameraDataDto } from '../services/cycle.service';
@@ -7,14 +7,14 @@ import { BrandService } from '../services/brand.service';
 import { SortService } from '../services/sort.service';
 import { TypeService } from '../services/type.service';
 import { CameraService } from '../services/camera.service';
-import { StateService } from '../services/state.service';
+import { HeaderComponent } from './header/header.component';
 
 
 
 @Component({
   selector: 'app-camera',
   standalone: true,
-  imports: [FormsModule, DatePipe, NgClass],
+  imports: [FormsModule, DatePipe, NgClass, HeaderComponent],
   templateUrl: './camera.component.html',
 })
 export class CameraComponent implements OnInit, OnDestroy {
@@ -24,7 +24,6 @@ export class CameraComponent implements OnInit, OnDestroy {
     private sortService: SortService,
     private typeService: TypeService,
     private cameraService: CameraService,
-    private stateService: StateService
   ) { }
 
   allCycles = toSignal(this.cycleService.getCycles(), { initialValue: [] });
@@ -60,27 +59,13 @@ export class CameraComponent implements OnInit, OnDestroy {
     return this.newCycle.selectedCameras.reduce((sum, cam) => sum + cam.count, 0);
   }
 
-  ngOnInit() {
-    const saved = this.stateService.load();
-    if (saved) {
-      this.newCycle = saved.newCycle;
-      this.selected_camera = saved.selected_camera;
-      this.selected_data = saved.selected_data;
-      this.activeCycle = saved.activeCycle;
-      this.creatingCycle = saved.creatingCycle;
-    }
-    
+  ngOnInit() {    
     this.connectWS();
     this.startRealTimeClock();
   }
 
   ngOnDestroy() {
-    //this.ws?.close();
-  }
-
-  @HostListener('window:beforeunload', ['$event'])
-  beforeUnloadHandler(event: any) {
-    this.autoSave();
+    this.ws?.close();
   }
 
   connectWS() {
@@ -90,33 +75,19 @@ export class CameraComponent implements OnInit, OnDestroy {
     this.ws.onmessage = (msg) => {
       const data = JSON.parse(msg.data);
       const cam = this.newCycle.selectedCameras.find(c => String(c.rtsp) === String(data.camera));
-      //console.log('WS camera:', data.camera);
-      //console.log('Selected cameras:', this.newCycle.selectedCameras.map(c => c.rtsp));
-      //console.log("cam =", cam);
 
       if (cam) cam.count = data.count;
       this.newCycle.selectedCameras = [...this.newCycle.selectedCameras];
       if (this.activeCycle) {
         this.newCycle.duration = this.getDuration(this.newCycle.startTime, new Date());
       }
+      this.updateCycleCamera();
     };
     this.ws.onclose = () => {
       console.log('WS closed. Reconnecting...');
       setTimeout(() => this.connectWS(), 2000);
     };
     this.ws.onerror = (err) => console.error('WS error', err);
-  }
-
-
-  restoreWebSocket() {
-    this.ws = new WebSocket("ws://localhost:8000");
-    this.ws.onopen = () => {
-      console.log("WS reconnected");
-      // Восстанавливаем подписки камер
-      for (let cam of this.newCycle.selectedCameras) {
-        this.ws.send(JSON.stringify({ action: 'start', camera: cam.rtsp }));
-      }
-    };
   }
 
   showCreateCycle() {
@@ -131,16 +102,19 @@ export class CameraComponent implements OnInit, OnDestroy {
   startCycle() {
     this.activeCycle = true;
     this.newCycle.startTime = new Date();
+    this.newCycle.endTime = new Date();
     this.newCycle.selectedCameras = this.buildSelectedCameras();
+    this.createCycle();
     for (let camera of this.newCycle.selectedCameras) {
       this.ws.send(JSON.stringify({ action: 'start', camera: camera.rtsp }));
     }
   }
 
   stopCycle() {
-    this.createCycle();
+    this.newCycle.endTime = new Date();
     this.creatingCycle = false;
     this.activeCycle = false;
+    this.updateCycleCamera();
     this.newCycle.cycleName = '';
     this.newCycle.duration = '';
     for (let camera of this.newCycle.selectedCameras) {
@@ -166,23 +140,37 @@ export class CameraComponent implements OnInit, OnDestroy {
   }
 
   createCycle() {
-    this.newCycle.endTime = new Date();
-
-
     const dto: CreateCycleDto = {
       name: this.newCycle.cycleName,
       total: this.totalBags.toString(),
       cameraData: this.newCycle.selectedCameras,
       startTime: this.newCycle.startTime.toISOString(),
       endTime: this.newCycle.endTime.toISOString(),
-      duration: this.getDuration(this.newCycle.startTime, this.newCycle.endTime)
+      duration: this.getDuration(this.newCycle.startTime, this.newCycle.endTime),
+      status: this.activeCycle
     };
-
     this.cycleService.createCycle(dto).subscribe({
       next: (res) =>  this.cycleService.reload(),
       error: (err) => console.error('Error creating cycle', err)
     });
   }
+
+  updateCycleCamera() {
+    const dto: CreateCycleDto = {
+      name: this.newCycle.cycleName,
+      total: this.totalBags.toString(),
+      cameraData: this.newCycle.selectedCameras,
+      startTime: this.newCycle.startTime.toISOString(),
+      endTime: new Date().toISOString(),
+      duration: this.getDuration(this.newCycle.startTime, new Date()),
+      status: this.activeCycle
+    };
+  this.cycleService.updateCount(dto)
+    .subscribe({
+      next: (res) =>  this.cycleService.reload(),
+      error: () => console.error("Update failed")
+    });
+}
 
   openCameraDropdown = false;
 
@@ -202,15 +190,6 @@ export class CameraComponent implements OnInit, OnDestroy {
     }));
   }
 
-  autoSave() {
-    this.stateService.save({
-      newCycle: this.newCycle,
-      selected_camera: this.selected_camera,
-      selected_data: this.selected_data,
-      activeCycle: this.activeCycle,
-      creatingCycle: this.creatingCycle
-    });
-  }
 
 
 }
