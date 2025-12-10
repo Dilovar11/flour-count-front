@@ -80,8 +80,8 @@ export class CameraComponent implements OnInit, OnDestroy {
       this.newCycle.selectedCameras = [...this.newCycle.selectedCameras];
       if (this.activeCycle) {
         this.newCycle.duration = this.getDuration(this.newCycle.startTime, new Date());
+        this.updateCycleCamera();
       }
-      this.updateCycleCamera();
     };
     this.ws.onclose = () => {
       console.log('WS closed. Reconnecting...');
